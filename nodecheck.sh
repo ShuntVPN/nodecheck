@@ -20,7 +20,7 @@
 #   /var/log/btmp                    — обнуляется (журнал неудачных входов по SSH)
 #   Docker перезапускается только если вы согласитесь (клиенты переподключатся за секунды).
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 URL="https://raw.githubusercontent.com/ShuntVPN/nodecheck/main/nodecheck.sh"
 MODE="check"; QUICK=0; YES=0
 for a in "$@"; do
@@ -43,6 +43,8 @@ sec()  { printf '\n%s%s%s\n' "$B" "$*" "$N"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 human() { awk -v b="${1:-0}" 'BEGIN{s="Б КБ МБ ГБ ТБ";split(s,u," ");i=1;while(b>=1024&&i<5){b/=1024;i++};printf (i==1?"%d %s":"%.1f %s"),b,u[i]}'; }
 sysget() { sysctl -n "$1" 2>/dev/null; }
+# «да»: y/yes, д/да и «у» — так выглядит y, если включена русская раскладка
+yes_ans() { case "$(echo "$1" | tr -d ' \r' | tr '[:upper:]' '[:lower:]')" in y|yes|д|да|у|Д|ДА|У) return 0;; *) return 1;; esac; }
 pl() { local n=$1; if [ $((n%10)) -eq 1 ] && [ $((n%100)) -ne 11 ]; then echo "$2"; elif [ $((n%10)) -ge 2 ] && [ $((n%10)) -le 4 ] && { [ $((n%100)) -lt 12 ] || [ $((n%100)) -gt 14 ]; }; then echo "$3"; else echo "$4"; fi; }
 case "$0" in /dev/fd/*|/proc/*|bash|-bash) SELF="${NODECHECK_CMD:-bash <(curl -sL $URL)}";; *) SELF="bash $0";; esac
 IS_ROOT=0; [ "$(id -u)" = 0 ] && IS_ROOT=1
@@ -278,7 +280,7 @@ has journal && echo "  • журнал systemd: не больше 200 МБ"
 has dockerlogs && echo "  • лимит логов Docker (50 МБ × 3) — для новых контейнеров"
 has nofile && echo "  • лимит открытых файлов Docker 1048576"
 [ -s /var/log/btmp ] && echo "  • обнулить /var/log/btmp (неудачные входы по SSH)"
-if [ "$YES" != 1 ]; then read -r -p "Применить? [y/N] " ans; [ "$ans" = y ] || [ "$ans" = Y ] || [ "$ans" = д ] || { echo "Отменено, ничего не изменено"; exit "$CODE"; }; fi
+if [ "$YES" != 1 ]; then read -r -p "Применить? [y/N] " ans </dev/tty; yes_ans "$ans" || { echo "Отменено, ничего не изменено (ответ: «$ans»)"; exit "$CODE"; }; fi
 
 BK="/root/nodecheck-backup-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$BK/files"; : > "$BK/created.list"
 backup() { if [ -e "$1" ]; then mkdir -p "$BK/files$(dirname "$1")"; cp -a "$1" "$BK/files$1"; else echo "$1" >> "$BK/created.list"; fi; }
@@ -333,8 +335,8 @@ fi
 if [ "$NEED_DOCKER" = 1 ]; then
   echo; echo "  Чтобы Docker взял новые лимиты, его нужно перезапустить, а контейнер ноды — пересоздать."
   echo "  Клиенты отвалятся на 10–20 секунд и переподключатся сами."
-  R2=n; [ "$YES" = 1 ] || read -r -p "  Перезапустить Docker сейчас? [y/N] " R2
-  if [ "$R2" = y ] || [ "$R2" = Y ] || [ "$R2" = д ]; then
+  R2=n; [ "$YES" = 1 ] || read -r -p "  Перезапустить Docker сейчас? [y/N] " R2 </dev/tty
+  if yes_ans "$R2"; then
     systemctl restart docker && echo "  ✓ Docker перезапущен"
     DIRN="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' remnanode 2>/dev/null)"
     if [ -n "$DIRN" ] && [ -d "$DIRN" ]; then (cd "$DIRN" && docker compose up -d --force-recreate >/dev/null 2>&1) && echo "  ✓ remnanode пересоздан с новыми лимитами"; fi
