@@ -20,7 +20,7 @@
 #   /var/log/btmp                    — обнуляется (журнал неудачных входов по SSH)
 #   Docker перезапускается только если вы согласитесь (клиенты переподключатся за секунды).
 
-VERSION="1.0.2"
+VERSION="1.0.3"
 URL="https://raw.githubusercontent.com/ShuntVPN/nodecheck/main/nodecheck.sh"
 MODE="check"; QUICK=0; YES=0
 for a in "$@"; do
@@ -103,13 +103,13 @@ fi
 # ======================================================================= 2. процессор
 sec "2. Процессор"
 read -r _ u1 n1 s1 i1 w1 q1 sq1 st1 _ < <(grep '^cpu ' /proc/stat)
-sleep 5
+sleep 10   # стил скачет — меряем 10 секунд, а не мгновенный срез
 read -r _ u2 n2 s2 i2 w2 q2 sq2 st2 _ < <(grep '^cpu ' /proc/stat)
 T=$(( (u2+n2+s2+i2+w2+q2+sq2+st2) - (u1+n1+s1+i1+w1+q1+sq1+st1) )); [ "$T" -gt 0 ] || T=1
 STEAL=$(( 100 * (st2-st1) / T )); BUSY=$(( 100 * (T - (i2-i1) - (w2-w1)) / T ))
-if [ "$STEAL" -le 3 ]; then ok "Стил (время, отобранное соседями): ${STEAL}%"
+if [ "$STEAL" -le 3 ]; then ok "Стил (время, отобранное соседями, за 10 с): ${STEAL}%"
 elif [ "$STEAL" -le 10 ]; then warn "Стил ${STEAL}% — узел у хостера загружен, нода будет подтормаживать под нагрузкой"
-else bad "Стил ${STEAL}% — узел перепродан, CPU отбирают соседи"; hint "просите у хостера перенос на другой узел или меняйте сервер"; fi
+else bad "Стил ${STEAL}% за 10 с — CPU отбирают соседи по узлу"; hint "перепроверьте вечером (nodecheck --quick); если держится выше 10% — просите у хостера перенос на другой узел"; fi
 LOAD1="$(cut -d' ' -f1 /proc/loadavg)"
 info "Загрузка CPU сейчас: ${BUSY}% · load average: $(cut -d' ' -f1-3 /proc/loadavg) (ядер $CORES)"
 if awk -v l="$LOAD1" -v c="$CORES" 'BEGIN{exit !(l > c*0.8)}'; then warn "Load выше 80% от числа ядер — сервер нагружен"; fi
