@@ -20,7 +20,7 @@
 #   /var/log/btmp                    — обнуляется (журнал неудачных входов по SSH)
 #   Docker перезапускается только если вы согласитесь (клиенты переподключатся за секунды).
 
-VERSION="1.0"
+VERSION="1.0.1"
 URL="https://raw.githubusercontent.com/ShuntVPN/nodecheck/main/nodecheck.sh"
 MODE="check"; QUICK=0; YES=0
 for a in "$@"; do
@@ -221,13 +221,13 @@ if [ "$(sysget net.ipv4.tcp_mtu_probing)" = "1" ]; then ok "MTU probing вклю
 CTMAX="$(sysget net.netfilter.nf_conntrack_max)"; CTNOW="$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)"
 if [ -n "$CTMAX" ]; then
   if [ "$CTMAX" -ge 131072 ]; then ok "Таблица соединений: ${CTNOW:-?} из $CTMAX"
-  else warn "Таблица соединений маленькая: ${CTNOW:-?} из $CTMAX — при переполнении новые соединения молча отбрасываются"; FIXES+=(conntrack); fi
+  else warn "Таблица соединений: ${CTNOW:-?} из $CTMAX — с запасом на рост лучше 262144 (при переполнении соединения молча отбрасываются)"; FIXES+=(conntrack); fi
   if [ -n "$CTNOW" ] && [ "$CTNOW" -gt $(( CTMAX * 8 / 10 )) ]; then bad "Таблица соединений почти полна ($CTNOW из $CTMAX)"; fi
 else info "conntrack не загружен — таблица соединений не ограничивает"; fi
 SOM="$(sysget net.core.somaxconn)"; if [ "${SOM:-0}" -ge 4096 ]; then ok "Очередь приёма соединений: $SOM"; else warn "Очередь приёма соединений: ${SOM:-?} (при всплесках подключений будут отказы)"; FIXES+=(queues); fi
 if have systemctl && [ "$(systemctl show docker -p LoadState --value 2>/dev/null)" = "loaded" ]; then
   NOF="$(systemctl show docker -p LimitNOFILE --value 2>/dev/null)"
-  if [ "$NOF" = "infinity" ] || [ "${NOF:-0}" -ge 1000000 ] 2>/dev/null; then ok "Лимит открытых файлов у Docker: $NOF"
+  if [ "$NOF" = "infinity" ] || [ "${NOF:-0}" -ge 500000 ] 2>/dev/null; then ok "Лимит открытых файлов у Docker: $NOF"
   else warn "Лимит открытых файлов у Docker: ${NOF:-?} — на сотне клиентов Xray начнёт отказывать"; FIXES+=(nofile); fi
 fi
 
@@ -237,7 +237,9 @@ JMAX="$(grep -E '^SystemMaxUse=' /etc/systemd/journald.conf /etc/systemd/journal
 if [ -n "$JMAX" ]; then ok "Журнал systemd ограничен: $JMAX"; else warn "Размер журнала systemd не ограничен — со временем займёт гигабайты"; FIXES+=(journal); fi
 if have docker; then
   DV="$(docker version -f '{{.Server.Version}}' 2>/dev/null | head -1)"; info "Docker ${DV:-не отвечает}"
+  RNLIM="$(docker inspect -f '{{index .HostConfig.LogConfig.Config "max-size"}}' remnanode 2>/dev/null)"
   if [ -f /etc/docker/daemon.json ] && grep -q 'max-size' /etc/docker/daemon.json; then ok "Лимит логов контейнеров задан в daemon.json"
+  elif [ -n "$RNLIM" ]; then info "Общего лимита логов Docker нет, но у remnanode свой ($RNLIM) — для остальных контейнеров можно добавить --fix"; FIXES+=(dockerlogs)
   else warn "Логи контейнеров Docker без лимита — могут разрастись до гигабайт"; FIXES+=(dockerlogs); fi
   if docker inspect remnanode >/dev/null 2>&1; then
     RS="$(docker inspect -f '{{.State.Status}}' remnanode)"; LC="$(docker inspect -f '{{index .HostConfig.LogConfig.Config "max-size"}}' remnanode 2>/dev/null)"
